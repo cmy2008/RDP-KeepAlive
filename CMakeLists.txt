@@ -68,5 +68,21 @@ if(WIN32 AND MSVC)
     )
 endif()
 
+# Copy FreeRDP DLLs to output directory (Windows)
+if(WIN32)
+    add_custom_command(TARGET rdp-keepalive POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:winpr>"
+            "$<TARGET_FILE_DIR:rdp-keepalive>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:freerdp>"
+            "$<TARGET_FILE_DIR:rdp-keepalive>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:freerdp-client>"
+            "$<TARGET_FILE_DIR:rdp-keepalive>"
+        COMMENT "Copying FreeRDP DLLs to output directory"
+    )
+endif()
+
 # Install rule
 install(TARGETS rdp-keepalive RUNTIME DESTINATION bin)
