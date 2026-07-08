@@ -1,6 +1,7 @@
 # RDP Keep-Alive
 > [!WARNING]
 > This project is fully AI generation use.
+
 Headless command-line tool that maintains RDP session connectivity by keeping the connection alive. Uses FreeRDP 3.x as the underlying library.
 
 ## Features
