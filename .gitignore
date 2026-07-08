@@ -1,0 +1,49 @@
+# Build directory
+build/
+build2/
+
+# FreeRDP dependency (clone separately)
+FreeRDP/
+
+# Generated VS files
+*.sln
+*.slnx
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+.vs/
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+CMakeUserPresets.json
+compile_commands.json
+
+# Object and library files
+*.o
+*.obj
+*.lib
+*.dll
+*.exp
+*.pdb
+*.ilk
+*.exe
+
+# Test program
+test_gai.c
+test_gai.exe
+test_gai.obj
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Debug logs
+*.log
