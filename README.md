@@ -3,6 +3,10 @@
 > This project is fully AI generation use.
 
 Headless command-line tool that maintains RDP session connectivity by keeping the connection alive. Uses FreeRDP 3.x as the underlying library.
+## 待优化
+1. 音频无响应即变滚木
+2. 疑似微软检测到滚木自动增加桌面渲染延迟
+3. 疑似长期滚木自动关闭虚拟桌面变真滚木
 
 ## Features
 
