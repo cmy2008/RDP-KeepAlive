@@ -35,6 +35,7 @@
 #include <freerdp/client/cmdline.h>
 #include <freerdp/client/channels.h>
 #include <freerdp/channels/channels.h>
+#include <freerdp/channels/rdpsnd.h>
 
 #include <winpr/crt.h>
 #include <winpr/assert.h>
@@ -244,6 +245,19 @@ static BOOL ka_pre_connect(freerdp* instance)
 	if (PubSub_SubscribeChannelDisconnected(instance->context->pubSub,
 	                                        freerdp_client_OnChannelDisconnectedEventHandler) < 0)
 		return FALSE;
+
+	/* Register rdpsnd audio channel with a fake backend so the server
+	 * creates the audio virtual channel; audio data is silently discarded. */
+	{
+		const char* const rdpsnd_params[] = { RDPSND_CHANNEL_NAME, "sys:fake" };
+
+		if (!freerdp_client_add_static_channel(settings, ARRAYSIZE(rdpsnd_params),
+		                                      rdpsnd_params))
+			return FALSE;
+		if (!freerdp_client_add_dynamic_channel(settings, ARRAYSIZE(rdpsnd_params),
+		                                       rdpsnd_params))
+			return FALSE;
+	}
 
 	return TRUE;
 }
