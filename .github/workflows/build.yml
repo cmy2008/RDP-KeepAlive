@@ -1,0 +1,159 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      freerdp_ref:
+        description: "FreeRDP ref to build against (tag / branch / SHA)"
+        required: false
+        default: "3.32.1"
+
+# A newer commit on the same ref cancels the still-running older build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Default FreeRDP version, unless the workflow_dispatch input overrides it.
+  FREERDP_REF: "3.32.1"
+  # Default OpenSSL install location (chocolatey "openssl" package / slproweb installer).
+  OPENSSL_HINT: 'C:\Program Files\OpenSSL-Win64'
+  ARTIFACT_NAME: rdp-keepalive-windows-x64
+
+jobs:
+  build-windows:
+    name: Windows x64 (MSVC)
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout RDP-KeepAlive
+        uses: actions/checkout@v7
+
+      # Keep the FreeRDP ref in one place so it can be overridden per run.
+      - name: Resolve FreeRDP ref
+        id: freerdp
+        env:
+          INPUT_REF: ${{ inputs.freerdp_ref }}
+        run: |
+          $ref = $env:INPUT_REF
+          if ([string]::IsNullOrWhiteSpace($ref)) { $ref = $env:FREERDP_REF }
+          "ref=$ref" | Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_OUTPUT
+          Write-Host "Building against FreeRDP ref: $ref"
+
+      # FreeRDP lives in a gitignored source subdirectory that CMakeLists.txt
+      # pulls in via add_subdirectory(FreeRDP), so it is checked out separately.
+      - name: Checkout FreeRDP
+        uses: actions/checkout@v7
+        with:
+          repository: FreeRDP/FreeRDP
+          ref: ${{ steps.freerdp.outputs.ref }}
+          path: FreeRDP
+          fetch-depth: 1
+
+      - name: Show FreeRDP revision
+        run: git -C FreeRDP log -1 --pretty="format:FreeRDP %h %s%n"
+
+      - name: Install OpenSSL
+        id: openssl
+        env:
+          HINT: ${{ env.OPENSSL_HINT }}
+        run: |
+          $root = $env:HINT
+          if (-not (Test-Path "$root\include\openssl\ssl.h")) {
+            Write-Host "OpenSSL not found at '$root', installing via chocolatey..."
+            choco install openssl -y --no-progress
+            if ($LASTEXITCODE -notin @(0, 1641, 3010)) {
+              throw "choco install openssl failed with exit code $LASTEXITCODE"
+            }
+            $root = Get-ChildItem -Path 'C:\Program Files' -Directory -Filter 'OpenSSL*' -ErrorAction SilentlyContinue |
+              Where-Object { Test-Path (Join-Path $_.FullName 'include\openssl\ssl.h') } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $root -or -not (Test-Path "$root\include\openssl\ssl.h")) {
+            throw "OpenSSL development files not found (looked at '$env:HINT')"
+          }
+          "dir=$root" | Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_OUTPUT
+          Write-Host "OpenSSL root: $root"
+          Get-ChildItem -Path "$root\bin" -Filter '*.dll' | ForEach-Object { Write-Host "  $($_.Name)" }
+
+      # FreeRDP wants ZLIB when WITH_SMARTCARD_EMULATE=ON, but the project's
+      # CMakeLists.txt already disables that and every other optional
+      # dependency, so OpenSSL is the only external dependency to provide.
+      - name: Configure
+        env:
+          OPENSSL_DIR: ${{ steps.openssl.outputs.dir }}
+        run: cmake -S . -B build -A x64 -DBUILD_TESTING=OFF "-DCMAKE_PREFIX_PATH=$env:OPENSSL_DIR" "-DOPENSSL_ROOT_DIR=$env:OPENSSL_DIR"
+
+      - name: Build rdp-keepalive
+        run: cmake --build build --config Release --parallel --target rdp-keepalive
+
+      - name: Locate built binary
+        id: bin
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter rdp-keepalive.exe | Select-Object -First 1
+          if (-not $exe) { throw "rdp-keepalive.exe not found under build/" }
+          "path=$($exe.FullName)" | Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_OUTPUT
+          "dir=$($exe.DirectoryName)" | Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_OUTPUT
+          Write-Host "Built: $($exe.FullName)"
+
+      # Copy the exe plus the FreeRDP DLLs (already placed next to it by the
+      # POST_BUILD rule of CMakeLists.txt), the OpenSSL runtime DLLs (nothing
+      # copies those for us) and the MSVC runtime so the zip runs standalone.
+      - name: Stage package directory
+        env:
+          BIN_DIR: ${{ steps.bin.outputs.dir }}
+          OPENSSL_DIR: ${{ steps.openssl.outputs.dir }}
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'dist\rdp-keepalive'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          Get-ChildItem -Path $env:BIN_DIR -File |
+            Where-Object { $_.Extension -in '.exe', '.dll' } |
+            Copy-Item -Destination $dist -Force
+
+          $sslDlls = @()
+          $sslDlls += Get-ChildItem -Path "$env:OPENSSL_DIR\bin" -Filter 'libssl-*.dll' -ErrorAction SilentlyContinue
+          $sslDlls += Get-ChildItem -Path "$env:OPENSSL_DIR\bin" -Filter 'libcrypto-*.dll' -ErrorAction SilentlyContinue
+          if ($sslDlls.Count -eq 0) { throw "No OpenSSL DLLs found in '$env:OPENSSL_DIR\bin'" }
+          $sslDlls | Copy-Item -Destination $dist -Force
+
+          foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') {
+            $src = Join-Path $env:SystemRoot "System32\$dll"
+            if (Test-Path $src) { Copy-Item -Path $src -Destination $dist -Force }
+          }
+
+          Get-ChildItem -Path $dist | Format-Table Name, Length
+          if (-not (Test-Path (Join-Path $dist 'rdp-keepalive.exe'))) { throw "rdp-keepalive.exe missing from $dist" }
+
+      # Runs the packaged exe, so a missing runtime DLL fails the build here
+      # instead of in the hands of a user.
+      - name: Smoke test
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'dist\rdp-keepalive\rdp-keepalive.exe'
+          $output = & $exe /help 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Output $output
+          Write-Output "exit code: $code"
+          if ($output -notmatch 'Usage:') {
+            throw "Smoke test failed (exit code $code) - the binary did not print its usage text"
+          }
+
+      - name: Package
+        run: Compress-Archive -Path 'dist\rdp-keepalive' -DestinationPath "$env:ARTIFACT_NAME.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: rdp-keepalive-windows-x64
+          path: rdp-keepalive-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30

@@ -1,4 +1,7 @@
 # RDP Keep-Alive
+
+[![Build](https://github.com/cmy2008/RDP-KeepAlive/actions/workflows/build.yml/badge.svg)](https://github.com/cmy2008/RDP-KeepAlive/actions/workflows/build.yml)
+
 > [!WARNING]
 > This project is fully AI generation use.
 
@@ -72,3 +75,17 @@ cmake --build build --config Release --target rdp-keepalive
 
 # Executable: build/Release/rdp-keepalive.exe
 ```
+
+### CI (GitHub Actions)
+
+Every push to `master` (and every tag) is compiled by
+[`.github/workflows/build.yml`](.github/workflows/build.yml) on `windows-latest`:
+
+- checks out FreeRDP **3.32.1** into `FreeRDP/`
+- installs OpenSSL through Chocolatey (`C:\Program Files\OpenSSL-Win64`)
+- configures/builds with MSVC and runs a smoke test on the packaged binary
+- uploads `rdp-keepalive-windows-x64.zip` (exe + FreeRDP/OpenSSL/MSVC DLLs) as a
+  workflow artifact, kept for 30 days
+
+To build against another FreeRDP version, start the workflow manually
+(*Actions → Build → Run workflow*) and fill in the `freerdp_ref` input.
